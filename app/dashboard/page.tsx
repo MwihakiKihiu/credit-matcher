@@ -2,11 +2,11 @@
 import { useState } from "react";
 
 export default function BorrowerForm() {
-  // We added <any> right here to tell TypeScript to relax the rules
-  const [formData, setFormData] = useState<any>({
+  // Changed the starting values of income and loanAmount to 0 so TypeScript knows they are numbers!
+  const [formData, setFormData] = useState({
     name: "",
-    income: "",
-    loanAmount: "",
+    income: 0, 
+    loanAmount: 0, 
     purpose: "",
     employment: "Salaried",
   });
