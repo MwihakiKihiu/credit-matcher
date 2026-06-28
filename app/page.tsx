@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
-export default function AppRouter() {
+export default function UnifiedMarketplaceRouter() {
   const [currentView, setCurrentView] = useState("borrower"); // 'borrower' or 'lender'
   
   // Borrower States
@@ -16,14 +16,14 @@ export default function AppRouter() {
   const [registrationFile, setRegistrationFile] = useState<File | null>(null);
   const [results, setResults] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [exemptionSubmitted, setExemptionSubmitted] = useState(false);
+  const [selectedOfferIndex, setSelectedOfferIndex] = useState<number | null>(null);
+  const [processingPayment, setProcessingPayment] = useState(false);
 
   // Lender Dashboard States
   const [deals, setDeals] = useState<any[]>([]);
   const [selectedDeal, setSelectedDeal] = useState<any>(null);
   const [lenderLoading, setLenderLoading] = useState(true);
 
-  // Listen to live database changes for the lender view
   useEffect(() => {
     async function fetchDeals() {
       const { data, error } = await supabase
@@ -34,17 +34,6 @@ export default function AppRouter() {
       setLenderLoading(false);
     }
     fetchDeals();
-
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'applications' }, (payload) => {
-        setDeals((currentDeals) => [payload.new, ...currentDeals]);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [currentView]);
 
   const handleBorrowerSubmit = async (e: any) => {
@@ -55,7 +44,7 @@ export default function AppRouter() {
     }
     setLoading(true);
     setResults(null);
-    setExemptionSubmitted(false);
+    setSelectedOfferIndex(null);
 
     const formDataBody = new FormData();
     formDataBody.append("name", name);
@@ -76,7 +65,16 @@ export default function AppRouter() {
         setLoading(false);
         return;
       }
-      setResults(data.metrics);
+      
+      // Dynamic Generation of competing blind lender offers based on qualification ceiling
+      const ceiling = data.metrics.qualifiedAmount;
+      const offers = [
+        { id: "L_A", blindName: "Tier-1 Bank Funder (Option A)", rate: 1.1, duration: 48, totalRepay: ceiling * 1.35 },
+        { id: "L_B", blindName: "Fintech Credit Fund (Option B)", rate: 1.4, duration: 36, totalRepay: ceiling * 1.42 },
+        { id: "L_C", blindName: "Micro-Asset Lender (Option C)", rate: 1.6, duration: 24, totalRepay: ceiling * 1.28 },
+      ];
+
+      setResults({ ...data.metrics, offers });
     } catch (err: any) {
       alert(`Upload Error: ${err.message}`);
     } finally {
@@ -84,101 +82,121 @@ export default function AppRouter() {
     }
   };
 
-  // --- RENDERING VIEWS ---
+  const handleAcceptLenderOffer = async (index: number, offer: any) => {
+    setProcessingPayment(true);
+    
+    // Simulate real-time merchant credit card acquisition charge to the lender
+    setTimeout(async () => {
+      try {
+        await supabase
+          .from('applications')
+          .update({ 
+            system_decision: `Accepted: ${offer.blindName}`,
+            status: 'Lead Unlocked' 
+          })
+          .eq('name', name);
+
+        setSelectedOfferIndex(index);
+        alert(`🎉 Match Confirmed! The platform has processed the lead acquisition card billing for ${offer.blindName}. Your dedicated booking voucher has been generated. Please proceed to book your offline office evaluation visit.`);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setProcessingPayment(false);
+      }
+    }, 2000);
+  };
+
+  // --- RENDERING VIEW: LENDER VIEW ---
   if (currentView === "lender") {
     return (
       <div className="p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen text-slate-800">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-slate-800">Asset Finance Lender Portal</h1>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Institutional Lender Marketplace</h1>
+            <p className="text-sm text-slate-500 mt-1">Browse pre-vetted transaction feeds. Contact authority unlocks automatically when chosen by borrower.</p>
+          </div>
           <button onClick={() => setCurrentView("borrower")} className="bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg text-sm hover:bg-slate-300">
             &larr; Exit to Borrower Form
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-6 mb-10">
-          <div className="p-6 bg-blue-50 border border-blue-100 rounded-xl">
-            <p className="text-sm text-blue-600 font-semibold uppercase tracking-wider">Active Deals in Pipe</p>
-            <p className="text-3xl font-bold text-slate-800 mt-2">{lenderLoading ? "..." : deals.length}</p>
+        <div className="grid grid-cols-2 gap-6 mb-10">
+          <div className="p-6 bg-white border border-slate-200 rounded-xl shadow-sm">
+            <p className="text-xs text-slate-400 font-bold uppercase">Total Pre-Vetted Leads Available</p>
+            <p className="text-4xl font-black text-blue-600 mt-1">{deals.length}</p>
           </div>
-          <div className="p-6 bg-emerald-50 border border-emerald-100 rounded-xl">
-            <p className="text-sm text-emerald-600 font-semibold uppercase tracking-wider">Platform Avg Yield</p>
-            <p className="text-3xl font-bold text-slate-800 mt-2">14.2%</p>
-          </div>
-          <div className="p-6 bg-indigo-50 border border-indigo-100 rounded-xl">
-            <p className="text-sm text-indigo-600 font-semibold uppercase tracking-wider">Avg Target LTV</p>
-            <p className="text-3xl font-bold text-slate-800 mt-2">62%</p>
+          <div className="p-6 bg-white border border-slate-200 rounded-xl shadow-sm">
+            <p className="text-xs text-slate-400 font-bold uppercase">Platform Lead Generation Value</p>
+            <p className="text-4xl font-black text-emerald-600 mt-1">KES {(deals.length * 4500).toLocaleString()}</p>
           </div>
         </div>
 
-        <h2 className="text-xl font-bold text-slate-800 mb-4">Live Pre-Vetted Applications</h2>
-        
         {lenderLoading ? (
-          <div className="text-center py-12 text-slate-500">Loading marketplace...</div>
+          <div className="text-center py-12 text-slate-400">Loading live marketplace feed...</div>
         ) : (
           <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="p-4 font-semibold text-slate-600">Borrower</th>
-                  <th className="p-4 font-semibold text-slate-600">Employment</th>
-                  <th className="p-4 font-semibold text-slate-600">Requested Amount</th>
-                  <th className="p-4 font-semibold text-slate-600">Calculated Max Installment</th>
-                  <th className="p-4 font-semibold text-slate-600">Underwriting Status</th>
-                  <th className="p-4 font-semibold text-slate-600">Action</th>
+                  <th className="p-4 font-semibold text-slate-600">Lead Status ID</th>
+                  <th className="p-4 font-semibold text-slate-600">Asset Context</th>
+                  <th className="p-4 font-semibold text-slate-600">Qualified Valuation</th>
+                  <th className="p-4 font-semibold text-slate-600">Calculated Cash Ceiling</th>
+                  <th className="p-4 font-semibold text-slate-600">Marketplace Authority Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {deals.map((deal) => (
-                  <tr key={deal.id} className="hover:bg-slate-50">
-                    <td className="p-4 font-medium text-slate-800">{deal.name}</td>
-                    <td className="p-4 text-slate-600">{deal.employment || "N/A"}</td>
-                    <td className="p-4 text-slate-600">KSh {Number(deal.loan_amount || 0).toLocaleString()}</td>
-                    <td className="p-4 font-medium text-slate-800">KSh {Number(deal.calculated_max_emi || 0).toLocaleString()}/mo</td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${
-                        deal.system_decision === 'Auto-Approved' ? 'bg-green-100 text-green-800' :
-                        deal.system_decision === 'Fraud Flagged' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                      }`}>
-                        {deal.system_decision || "Pending"}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <button onClick={() => setSelectedDeal(deal)} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-800">
-                        Review Asset
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {deals.map((deal) => {
+                  const isUnlocked = deal.status === 'Lead Unlocked' || deal.system_decision?.includes('Accepted');
+                  return (
+                    <tr key={deal.id} className="hover:bg-slate-50">
+                      <td className="p-4 font-medium text-slate-900">
+                        {isUnlocked ? deal.name : `🔒 Pre-Vetted Lead #${deal.id.toString().slice(0, 4)}`}
+                      </td>
+                      <td className="p-4 text-slate-600">{deal.purpose || "Vehicle Loan"}</td>
+                      <td className="p-4 text-slate-600 font-semibold">KSh {Number(deal.loan_amount || 0).toLocaleString()}</td>
+                      <td className="p-4 text-slate-600">KSh {Number(deal.calculated_max_emi || 0).toLocaleString()}/mo</td>
+                      <td className="p-4">
+                        {isUnlocked ? (
+                          <button onClick={() => setSelectedDeal(deal)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700">
+                            ✓ Unlocked - View Phone & Book Visit
+                          </button>
+                        ) : (
+                          <span className="text-xs font-bold bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full border">
+                            Waiting for Borrower Acceptance Selection
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
-        {/* DETAILS MODAL */}
+        {/* MODAL VIEW */}
         {selectedDeal && (
-          <div className="fixed inset-0 bg-slate-900 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full overflow-hidden">
+          <div className="fixed inset-0 bg-slate-900 bg-opacity-60 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-xl max-w-xl w-full overflow-hidden">
               <div className="bg-slate-50 p-6 border-b flex justify-between items-center">
-                <h3 className="text-2xl font-bold text-slate-800">Risk Assessment: {selectedDeal.name}</h3>
-                <button onClick={() => setSelectedDeal(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+                <h3 className="text-xl font-bold text-slate-900">Contact Details Unlocked</h3>
+                <button onClick={() => setSelectedDeal(null)} className="text-slate-400 text-2xl font-bold">&times;</button>
               </div>
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Statement Analysis</h4>
-                    <p className="text-slate-600 text-sm">Extracted Monthly Income: <span className="font-bold text-slate-800">KSh {Number(selectedDeal.income || 0).toLocaleString()}</span></p>
-                    <p className="text-slate-600 text-sm mt-1">Stated Loan Request: <span className="font-bold text-blue-600">KSh {Number(selectedDeal.loan_amount || 0).toLocaleString()}</span></p>
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Statutory Parameters</h4>
-                    <p className="text-slate-600 text-sm">Kenyan 1/3 Limit Ceiling: <span className="font-bold text-blue-600">KSh {Number(selectedDeal.calculated_max_emi || 0).toLocaleString()} /mo</span></p>
-                    <p className="text-slate-600 text-sm mt-1">Underwriting Class: <span className="font-semibold text-amber-700">{selectedDeal.system_decision}</span></p>
-                  </div>
+              <div className="p-6 space-y-4">
+                <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200">
+                  <p className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Borrower Selection</p>
+                  <p className="text-sm text-emerald-900 mt-1">This user successfully reviewed your terms and chose your package pipeline. Your billing card has been debited for the generation fee.</p>
                 </div>
-                <div className="flex space-x-4 pt-4 border-t">
-                  <button onClick={() => { alert("Asset Funded!"); setSelectedDeal(null); }} className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700">Approve & Fund Asset</button>
-                  <button onClick={() => setSelectedDeal(null)} className="flex-1 bg-white border text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-50">Close</button>
+                <div className="space-y-2">
+                  <p className="text-sm"><strong>Borrower Name:</strong> {selectedDeal.name}</p>
+                  <p className="text-sm"><strong>Target Vehicle:</strong> {selectedDeal.purpose}</p>
+                  <p className="text-sm"><strong>Stated Phone Contact:</strong> +254 712 345678</p>
+                  <p className="text-sm"><strong>Assigned Verification Route:</strong> {selectedDeal.employment}</p>
                 </div>
+                <button onClick={() => { alert("SMS Notification sent to client confirming office appointment."); setSelectedDeal(null); }} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold text-sm">
+                  Confirm In-Office Booking Appointment
+                </button>
               </div>
             </div>
           </div>
@@ -187,7 +205,7 @@ export default function AppRouter() {
     );
   }
 
-  // DEFAULT VIEW: BORROWER APPLICATION FORM
+  // DEFAULT VIEW: BORROWER WORKFLOW
   return (
     <div className="bg-slate-50 min-h-screen pb-12 text-slate-800">
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
@@ -195,7 +213,7 @@ export default function AppRouter() {
           CREDIT<span className="text-slate-800">MATCH</span>
         </div>
         <button onClick={() => setCurrentView("lender")} className="bg-slate-900 text-white hover:bg-slate-800 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
-          Lender Portal Login &rarr;
+          Lender Portal &rarr;
         </button>
       </header>
 
@@ -262,42 +280,61 @@ export default function AppRouter() {
           </button>
         </form>
 
-        {/* AFFORDABILITY PANEL */}
+        {/* OFFERS MARKETPLACE PANEL */}
         {results && (
           <div className="mt-8 p-6 bg-slate-50 rounded-xl border border-slate-200">
-            <h2 className="text-xl font-bold mb-4 text-slate-800">Statement Underwriting Assessment</h2>
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="p-4 bg-white border rounded-lg shadow-sm">
-                <p className="text-xs text-gray-500 font-bold uppercase">Extracted Income Reality</p>
-                <p className="text-2xl font-black text-slate-800 mt-1">KSh {results.extractedIncome.toLocaleString()}</p>
-              </div>
-              <div className="p-4 bg-white border rounded-lg shadow-sm">
-                <p className="text-xs text-gray-500 font-bold uppercase">Statutory 1/3 Monthly EMI Ceiling</p>
-                <p className="text-2xl font-black text-blue-600 mt-1">KSh {results.maxAllowedEMI.toLocaleString()}</p>
-              </div>
+            <div className="border-b pb-4 mb-6">
+              <h2 className="text-xl font-bold text-slate-900">Statement Underwriting Assessment Complete</h2>
+              <p className="text-xs text-slate-500 mt-1">Maximum statutory monthly EMI ceiling calculated: <span className="font-bold text-blue-600">KSh {results.maxAllowedEMI.toLocaleString()}/mo</span></p>
             </div>
 
-            {results.decision === "Auto-Approved" ? (
-              <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900">
-                <h3 className="font-bold text-lg">✓ Capital Request Approved!</h3>
-                <p className="text-sm mt-1">Your extracted cash ledger satisfies the risk criteria for your full financing limit of <span className="font-bold">KSh {results.requestedAmount.toLocaleString()}</span>.</p>
-              </div>
-            ) : (
-              <div className="p-6 bg-amber-50 border border-amber-200 rounded-xl text-amber-900">
-                <h3 className="font-bold text-lg text-amber-950">⚠ System Counter-Offer Triggered</h3>
-                <p className="text-sm mt-2">You requested KSh {results.requestedAmount.toLocaleString()}. To remain compliant with Kenya's 1/3 salary law, your maximum legal capital capacity is:</p>
-                <div className="my-4 p-4 bg-white rounded-lg border border-amber-300 text-center">
-                  <span className="text-3xl font-black text-amber-700 block">KSh {results.qualifiedAmount.toLocaleString()}</span>
-                </div>
-                {!exemptionSubmitted ? (
-                  <button onClick={async () => { await fetch("/api/match", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); setExemptionSubmitted(true); }} className="bg-amber-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-amber-700">
-                    Request Exemption Review for Original Amount
-                  </button>
-                ) : (
-                  <span className="text-xs font-bold bg-indigo-100 text-indigo-800 px-3 py-2 rounded-full">✓ Sent to Alternative Private Placement Funds</span>
-                )}
-              </div>
-            )}
+            <h3 className="font-bold text-sm text-slate-700 uppercase tracking-wide mb-4">Institutional Offers Generated Below</h3>
+            
+            <div className="space-y-4">
+              {results.offers.map((offer: any, idx: number) => {
+                const isChosen = selectedOfferIndex === idx;
+                const anyChosen = selectedOfferIndex !== null;
+                
+                return (
+                  <div key={idx} className={`p-5 rounded-xl border bg-white shadow-sm transition-all ${isChosen ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-200'}`}>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-xs font-bold text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded">Option #{idx + 1}</span>
+                        <div className="grid grid-cols-3 gap-6 mt-3 text-sm">
+                          <div>
+                            <span className="text-xs text-slate-400 block font-medium">Monthly Cost Rate</span>
+                            <span className="text-base font-bold text-slate-800 mt-0.5 block">{offer.rate}% per month</span>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 block font-medium">Amortization Term</span>
+                            <span className="text-base font-bold text-slate-800 mt-0.5 block">{offer.duration} Months</span>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 block font-medium">Total Lifetime Repayable</span>
+                            <span className="text-base font-bold text-slate-800 mt-0.5 block">KSh {Math.floor(offer.totalRepay).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        {isChosen ? (
+                          <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-2 rounded-lg block text-center">
+                            ✓ Selection Confirmed
+                          </span>
+                        ) : (
+                          <button 
+                            onClick={() => handleAcceptLenderOffer(idx, offer)}
+                            disabled={anyChosen || processingPayment}
+                            className="bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors">
+                            {processingPayment ? "Charging Card..." : "Accept & Proceed"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
