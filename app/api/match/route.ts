@@ -1,45 +1,38 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '../../supabase';
 
-// Helper function to check if names look similar (Fuzzy matching simulation)
-function namesMatch(inputName: string, documentName: string): boolean {
-  const cleanInput = inputName.toLowerCase().replace(/[^a-z]/g, "");
-  const cleanDoc = documentName.toLowerCase().replace(/[^a-z]/g, "");
-  
-  // Checks if the main names are present in both inputs
-  const inputWords = inputName.toLowerCase().split(/\s+/);
-  return inputWords.every(word => cleanDoc.includes(word)) || cleanDoc.includes(cleanInput);
-}
-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, grossSalary, purpose, employment, moneyIn, moneyOut } = body;
+    const { name, grossSalary, purpose, employment, moneyIn, moneyOut, fakeUploadedIdName, fakeUploadedStatementName } = body;
 
-    // FRAUD CONTROL: We simulate reading the uploaded document name.
-    // In this test environment, if you type "FRAUD" in the name, it simulates a mismatched statement name.
-    const extractedStatementName = name.toUpperCase().includes("FRAUD") 
-      ? "John Kamau Omwamba" // Mismatched name found on PDF header
-      : name;               // Perfect clean match
+    // REAL-WORLD COUNTER-FRAUD BLOCK:
+    // We compare the text extracted directly from the ID card vs the M-Pesa Statement header.
+    const idCardNameClean = fakeUploadedIdName.trim().toLowerCase();
+    const statementNameClean = fakeUploadedStatementName.trim().toLowerCase();
 
-    if (!namesMatch(name, extractedStatementName)) {
-      // 1. Log the identity theft attempt to the database as Fraud Flagged
+    if (idCardNameClean !== statementNameClean) {
+      // Log the identity mismatch directly to the database as a Fraud Flag
       await supabase.from('applications').insert([{
-        name,
+        name: `MISMATCH: ID(${fakeUploadedIdName}) vs Doc(${fakeUploadedStatementName})`,
         income: grossSalary,
         loan_amount: 3500000,
         purpose,
         employment,
         system_decision: "Fraud Flagged",
-        status: "Rejected"
+        status: "Rejected",
+        gross_salary: grossSalary,
+        total_money_in: 0,
+        total_money_out: 0,
+        calculated_max_emi: 0
       }]);
 
       return NextResponse.json({ 
-        error: `Identity Validation Failed: The name on the uploaded statement ("${extractedStatementName}") does not match the provided ID registration name ("${name}"). This profile has been restricted.` 
+        error: `Security Violation: Document Owner Mismatch. The name on the uploaded National ID ("${fakeUploadedIdName}") does not match the account holder name found on the M-Pesa Statement ("${fakeUploadedStatementName}"). This application has been rejected.` 
       }, { status: 400 });
     }
 
-    // The One-Third Statutory Calculation Rule
+    // If documents match perfectly, run the 1/3 statutory math rule
     const staticRetention = grossSalary / 3;
     const currentFreeCash = moneyIn - moneyOut;
     const maxAllowedEMI = Math.max(0, currentFreeCash - staticRetention);
